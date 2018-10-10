@@ -1,0 +1,7 @@
+Q. What do you think is the reason for this issue for the supply-demand gap? Write the answer in less than 100 words
+
+Ans. There are more number of cancelled trips around 5:00 am to 9:00 am. As drivers are unwilling to travel to airport from city 
+due to higher travel time may be because of traffic.
+
+And in evening, at airport there is No cars available from 5:00 pm till 10:00 pm, it can be presumed that drivers do not prefer to wait for the trips in the areas nearby airport. 
+In fact they prefer to make short and multiple trips within the city, leading to No cars availability at airport
