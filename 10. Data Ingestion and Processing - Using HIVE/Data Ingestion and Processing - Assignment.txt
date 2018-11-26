@@ -1,0 +1,473 @@
+/* Load the required JAR Files */ 
+ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar;
+
+drop table if exists NYC_Taxi;
+
+/* Insert the initial data */
+
+CREATE EXTERNAL TABLE if not exists NYC_TAXI (VendorID INT, pickup_datetime TIMESTAMP, dropoff_datetime TIMESTAMP, passenger_count INT, trip_distance INT,
+RatecodeID INT, store_and_fwd_flag STRING, PULocationID INT, DOLocationID INT, payment_type INT, fare_amount DOUBLE, extra DOUBLE, mta_tax DOUBLE, tip_amount DOUBLE,
+tolls_amount DOUBLE, improvement_surcharge DOUBLE, total_amount DOUBLE) 
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+location '/common_folder/nyc_taxi_data/'
+TBLPROPERTIES ("skip.header.line.count"="2");
+
+/* Check for NULL values, if present */
+select count(*) as NULL_Value_Count from NYC_TAXI
+where VendorID is NULL OR pickup_datetime is NULL OR dropoff_datetime is NULL OR passenger_count is NULL OR trip_distance is NULL OR RatecodeID is NULL OR
+store_and_fwd_flag is NULL OR PULocationID is NULL OR DOLocationID is NULL OR payment_type is NULL OR fare_amount is NULL OR extra is NULL OR mta_tax is NULL OR
+tip_amount is NULL OR tolls_amount is NULL OR improvement_surcharge is NULL OR total_amount is NULL;
+
+-- ****************************** No Null value is present in the data ****************************** --
+/* normal data inspection */
+
+select pickup_datetime, year(pickup_datetime), month(pickup_datetime), day(pickup_datetime), hour(pickup_datetime), minute(pickup_datetime), second(pickup_datetime) 
+from NYC_TAXI limit 10;
+select * from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) limit 10;
+select count(VendorID) as Vendor_Count, VendorID from NYC_TAXI group by VendorID;
+select count(*) from NYC_TAXI;
+
+/* There are total 18793079 recodrs */
+
+-- ************************************************************************************************ --
+-- ****************************** Part 1 : Basic Data Quality Checks ****************************** --
+-- ************************************************************************************************ --
+
+-- ****************************** Question 1 ****************************** --
+
+-- Q1. How many records has each TPEP provider provided? Write a query that summarises the number of records of each provider. --
+
+select VendorID, count(*) as No_of_Records from NYC_TAXI group by VendorID;
+
+/* Vendor 1 has provided 8447149 recorder where as Vendor 2 has provided 10345930 number of records */
+
+
+-- ****************************** Question 2 ****************************** --
+
+-- Q2. The data provided is for months November and December only. Check whether the data is consistent, and if not, identify the data quality issues. 
+-- Mention all data quality issues in comments.
+
+/* Analysing all the columns for data consistency and finding the data quality issues */
+
+select DISTINCT(VendorID) as Vendor_ID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12);
+select count(VendorID) as Vendor_Count, VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by VendorID;
+/* Two Vendors are there in data with Vendor ID 1 and 2 */
+/* Vendro_ID = 1 has 8447149 entries , Vendor_ID = 2 has 10345615 entries */
+
+select DISTINCT(year(pickup_datetime)) from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12); /* 2017 */
+select count(pickup_datetime) as PickUp_Year_Count, year(pickup_datetime) from NYC_TAXI group by year(pickup_datetime);
+/* Data is of only one year i.e. 2017 (This confirms the data has been filtered correctly) */
+/* there are total 18792972 pick up entries in year 2017 */
+
+select DISTINCT(pickup_datetime) from NYC_TAXI; /* 11, 12 */
+select count(month(pickup_datetime)) as PickUp_Month_Count, month(pickup_datetime) from NYC_TAXI 
+where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by month(pickup_datetime);
+/* Data is for month 11 i.e. Nov and 12 i.e. Dec for the year 2017 (This confirms correct data filteration) */
+/* There are 9284716 pick up entries in the month of Nov and 9508048 pick up entries in the month on Dec */
+
+
+select DISTINCT(Passenger_count) from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12);
+/* There are various entries as no of passengers travelled in same ride: 0,1,2,3,4,5,6,7,8,9,192 */
+/* 0 and 192 looks erroneous data, investigate further and check which Vendor is providing erroneous data */
+
+select count(Passenger_count) as Count_, Passenger_count as Passenger_In_Drive from NYC_TAXI 
+where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by Passenger_count;
+
+select VendorID, count(Passenger_count) as Passenger_Count_0 from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and Passenger_count = 0 group by VendorID;
+
+select VendorID, Passenger_count from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and Passenger_count = 192;
+/* There are 108970 entries when passenger is 0 and only 1 entry when passenger is 192 */
+/* Total 108750 entries are provided by Vendor_ID 1 and 221 entries are provided by Vendor ID 2 */
+
+select DISTINCT(trip_distance) from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) order by trip_distance asc;
+
+select max(trip_distance) as Longest_Trip, min(trip_distance) as Shortest_Trip from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12);
+
+select count(trip_distance) as Trip_Count, trip_distance from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by trip_distance order by trip_distance asc;
+/* There are 4909978 trips of O miles, Investigating further to find which Vendor is providing wrong info */
+
+select count(trip_distance) as Trip_Count, VendorID from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and trip_distance = 0 group by VendorID;
+/* Vendor 1 provides 2221858 and Vendor 2 provides 2688120 entries as trip distance = 0 miles */
+
+select count(RatecodeID) as RatecodeID_Count, RatecodeID from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by RatecodeID; 
+/* Rate ID code values provided 1,2,3,4,5,6,99, where as according to data dictionary there is no rate code with id 99 */
+/* There are total 178 values having Rate Code Id as 99 */
+select count(RatecodeID) as RatecodeID_Count, VendorID from NYC_TAXI where where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and RatecodeID = 99 group by VendorID;
+/* Out of 178, 172 entries are from Vendor 1 and 6 entries are from Vendor 2 */
+
+select count(store_and_fwd_flag), store_and_fwd_flag from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by store_and_fwd_flag;
+/* 63069 = Yes and 18730010 = No */
+/* 8447149 by Vendor 1 and 10345615 by Vendor 2 */
+
+select count(store_and_fwd_flag), VendorID from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by VendorID;
+
+select count(store_and_fwd_flag), passenger_count from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by passenger_count;
+
+select count(payment_type) as Count_Paymnet_Type, payment_type from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by payment_type;
+/* Most passengers prefer to pay via Credit Card, Cash seems to be the second best choice among the passeneger */
+
+
+select count(Fare_amount), Fare_amount from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by Fare_amount;
+/* Some -ve values are present */
+/* Fare can't be zero and can't be negative */
+
+select count(extra) as Extra_Count, extra_Value from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by extra;
+
+select count(extra) as Extra_Count, VendorID from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and extra < 0 group by VendorID;
+/* Some -ve values are present/
+/* Since extra only includes the $0.50 and $1 rush hour and overnight charges, so this value can't
+be negative, extra can be 0 but not negative (extra can be zero for trips that are not during rush hous or not overnite) */
+/* there are total 4835 - ve values, 9 values provided by Vendor 1 and 4826 values provided by Vendor 2 */
+
+select count(mta_tax) as mta_tax_Count, mta_tax_Value from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by mta_tax;
+
+select count(mta_tax) as mta_tax_Count, VendorID from NYC_TAXI where 
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and mta_tax < 0 group by VendorID;
+/* Some -ve values are present, there are 9092 negative value */
+/* These values are provided by Vendor 2 */
+
+select count(tip_amount) as tip_amount_Count, tip_amount as tip_amount_Value from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by tip_amount;
+
+select count(tip_amount) as tip_amount_Count, VendorID from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and tip_amount < 0 group by VendorID;
+/* Some -ve values are present */
+/* There are total 97 negative values for tip amount and all are provided by Vendor 2 */
+
+select count(tolls_amount) as tolls_amount_count, tolls_amount from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by tolls_amount;
+
+select count(tolls_amount) as tolls_amount_count, VendorID from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and tolls_amount < 0 group by VendorID;
+/* Some -ve values are present */
+/* There are total 41 negative values for tolls amount and all are provided by Vendor 2 */
+
+select DISTINCT(improvement_surcharge) from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12);
+
+select count(improvement_surcharge) as improvement_surcharge_Count, improvement_surcharge from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by improvement_surcharge;
+
+select count(improvement_surcharge) as improvement_surcharge_Count, VendorID from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and improvement_surcharge != 0.3 group by VendorID;
+/* $0.30 improvement surcharge assessed trips at the flag drop */
+/* There are other negative value and values other than $0.30 */
+/* 18778435 values as 0.3 */
+/* 933 values provided by Vendor 1 and 13396 values provided by Vendor 2 */
+
+select count(total_amount), total_amount from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) group by total_amount;
+
+select count(total_amount), VendorID from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11, 12) and total_amount <= 0 group by VendorID;
+
+/* Some -ve values are present and Zero values also present*/
+/* Total amount can't be zero or neative */
+/* 612 values is given by Vendor 1 and 10882 values is given by Vendor 2*/
+
+
+select Fare_amount, extra, mta_tax, tip_amount, tolls_amount, improvement_surcharge, total_amount from NYC_TAXI where
+year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and total_amount <= 0;
+
+select count(total_amount), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and total_amount <= 0 group by VendorID;
+select count(Fare_amount), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and Fare_amount <= 0 group by VendorID;
+select count(extra), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and extra < 0 group by VendorID;
+select count(mta_tax), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and mta_tax <= 0 group by VendorID;
+select count(tip_amount), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and tip_amount <= 0 group by VendorID;
+select count(tolls_amount), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and tolls_amount <= 0 group by VendorID;
+select count(improvement_surcharge), VendorID from NYC_TAXI where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and improvement_surcharge <= 0 group by VendorID;
+
+-- ***************************************************************************************************************************************************--
+-- ************************************************************ Summary and Assumptions **************************************************************--
+-- Vendor
+/* Two Vendors are there in data with Vendor ID 1 and 2 */
+/* Vendro_ID = 1 has 8447149 entries , Vendor_ID = 2 has 10345615 entries */
+
+-- Pick Up Year
+/* Data is of only one year i.e. 2017 (This confirms the data has been filtered correctly) */
+/* there are total 18792972 pick up entries in year 2017 */
+
+-- Pick Up Year
+/* Data is for month 11 i.e. Nov and 12 i.e. Dec for the year 2017 (This confirms correct data filteration) */
+/* There are 9284716 pick up entries in the month of Nov and 9508048 pick up entries in the month on Dec */
+
+-- Passenger_count
+/* There are various entries as no of passengers travelled in same ride: 0,1,2,3,4,5,6,7,8,9,192 */
+/* 0 and 192 looks erroneous data, investigate further and check which Vendor is providing erroneous data */
+/* There are 108970 entries when passenger is 0 and only 1 entry when passenger is 192 */
+/* Total 108750 entries are provided by Vendor_ID 1 and 221 entries are provided by Vendor ID 2 */
+
+-- trip_distance
+/* There are 4909978 trips of O miles, Investigating further to find which Vendor is providing wrong info */
+/* Vendor 1 provides 2221858 and Vendor 2 provides 2688120 entries as trip distance = 0 miles */
+
+-- RatecodeID 
+/* Rate ID code values provided 1,2,3,4,5,6,99, where as according to data dictionary there is no rate code with id 99 */
+/* There are total 178 values having Rate Code Id as 99 */
+/* Out of 178, 172 entries are from Vendor 1 and 6 entries are from Vendor 2 */
+
+-- store_and_fwd_flag
+/* 63069 = Yes and 18730010 = No */
+/* 8447149 by Vendor 1 and 10345615 by Vendor 2 */
+
+-- payment_type
+/* Most passengers prefer to pay via Credit Card, Cash seems to be the second best choice among the passeneger */
+
+-- Fare_amount
+/* Some -ve values are present */
+/* Fare can't be zero and can't be negative */
+
+-- extra
+/* Some -ve values are present/
+/* Since extra only includes the $0.50 and $1 rush hour and overnight charges, so this value can't
+-- be negative, extra can be 0 but not negative (extra can be zero for trips that are not during rush hous or not overnite) */
+/* there are total 4835 - ve values, 9 values provided by Vendor 1 and 4826 values provided by Vendor 2 */
+
+-- mta_tax
+/* Some -ve values are present, there are 9092 negative value */
+/* These values are provided by Vendor 2 */
+
+-- tip_amount
+/* Some -ve values are present */
+/* There are total 97 negative values for tip amount and all are provided by Vendor 2 */
+
+-- tolls_amount
+/* Some -ve values are present */
+/* There are total 41 negative values for tolls amount and all are provided by Vendor 2 */
+
+-- improvement_surcharge
+/* $0.30 improvement surcharge assessed trips at the flag drop */
+/* There are other negative value and values other than $0.30 */
+/* 18778435 values as 0.3 */
+/* 933 values provided by Vendor 1 and 13396 values provided by Vendor 2 */
+
+-- total_amount
+/* Some -ve values are present and Zero values also present*/
+/* Total amount can't be zero or neative */
+/* 612 values is given by Vendor 1 and 10882 values is given by Vendor 2*/
+
+-- ****************************** Question 3 ****************************** --
+-- Q3. You might have encountered unusual or erroneous rows in the dataset. 
+-- Can you conclude which vendor is doing a bad job in providing the records using different columns of the dataset? 
+-- Summarise your conclusions based on every column where these errors are present. 
+-- For example,  There are unusual passenger count i.e 0 or 192 which is unusual.
+
+select VendorID, count(*) as ErroneousData from NYC_TAXI 
+where year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12) and passenger_count not in (1,2,3,4,5,6) or trip_distance <= 0.0 or RatecodeID = 99 or 
+payment_type not in (1,2,3,4,5,6) or Fare_amount <= 0.0 and extra not in (0.0,0.5,1) or mta_tax not in (0.0, 0.5) or tip_amount < 0.0 
+or tolls_amount <= 0.0 or improvement_surcharge not in (0.0,0.3) or total_amount <= 0.0 group by VendorID;
+
+-- Vendor 1 provided 8050446 entries of erroneous data.
+-- Vendor 2 provided 9785128 entries of erroneous data.
+-- Thus vendor 2 is providing more erroneous data.
+
+
+-- ****************************** Part 2 - Analysis - I ****************************** --
+
+-- Before answering the below questions, you need to create a clean, ORC partitioned table for analysis. Remove all the erroneous rows.
+
+/* Load files required for partioning the table */
+SET hive.exec.max.dynamic.partitions=100000;
+SET hive.exec.max.dynamic.partitions.pernode=100000;
+
+drop table if exists NYC_Taxi_ORC;
+
+/* Create external table 'NYC_Taxi_ORC' in this table data will partitioned in to year and month and then bucketed in to 4 buckets */
+/* Choosing Year and Month as partitioning key */
+
+CREATE EXTERNAL TABLE IF NOT EXISTS NYC_Taxi_ORC (
+VendorID INT, 
+pickup_datetime TIMESTAMP,
+dropoff_datetime TIMESTAMP,
+passenger_count INT, 
+trip_distance INT,
+RatecodeID INT,
+store_and_fwd_flag STRING,
+PULocationID INT,
+DOLocationID INT,
+payment_type INT,
+fare_amount DOUBLE,
+extra DOUBLE,
+mta_tax DOUBLE,
+tip_amount DOUBLE,
+tolls_amount DOUBLE,
+improvement_surcharge DOUBLE,
+total_amount DOUBLE) 
+PARTITIONED BY (PickUp_Year INT, PickUp_Month INT, PickUp_Day INT)
+clustered by (passenger_count) into 4 buckets
+stored as orc LOCATION '/user/hive/warehouse/ravi_nyc_orc'
+tblproperties ("orc.compress"="SNAPPY");
+
+select * from NYC_Taxi_ORC;
+
+/* Then, write data into Partioned table compressed to ORC format */
+/* Filetring the erroneous data */
+
+insert overwrite table NYC_Taxi_ORC partition (PickUp_Year, PickUp_Month, PickUp_Day)
+select VendorID, pickup_datetime, dropoff_datetime, passenger_count, trip_distance, RatecodeID, store_and_fwd_flag,
+PULocationID, DOLocationID, payment_type, fare_amount, extra, mta_tax, tip_amount, tolls_amount, improvement_surcharge,
+total_amount,
+year(pickup_datetime) as PickUp_Year,
+month(pickup_datetime) as PickUp_Month,
+day(pickup_datetime) as PickUp_Day
+from NYC_TAXI
+where year(pickup_datetime) = 2017 and 
+month(pickup_datetime) in (11,12) and 
+passenger_count in (1,2,3,4,5,6) and 
+trip_distance > 0.0 and 
+RatecodeID != 99 and 
+payment_type in (1,2,3,4,5,6)  and 
+Fare_amount > 0.0 and 
+extra in (0.0,0.5,1) and 
+mta_tax in (0.0, 0.5) and 
+tip_amount >= 0.0 and 
+tolls_amount > 0.0 and 
+improvement_surcharge in (0.0,0.3) and 
+total_amount > 0.0;
+
+/* Normal data checking for newly created table */
+
+select count(VendorID) from NYC_Taxi_ORC;
+select tip_amount, count(tip_amount) from nyc_taxi group by tip_amount;
+select RatecodeID, count(RatecodeID) from nyc_taxi group by RatecodeID;
+select extra, count(extra) from nyc_taxi group by extra;
+select count(payment_type) from nyc_taxi where payment_type = 4 group by payment_type;
+select count(passenger_count), passenger_count from nyc_taxi where passenger_count in (1,2,3,4,5,6) and year(pickup_datetime) = 2017 and month(pickup_datetime) in (11,12)
+and year(dropoff_datetime) = 2017 and month(dropoff_datetime) in (11,12) group by passenger_count;
+
+-- ****************************** Question 1 ****************************** --
+
+-- Q1. Compare the overall average fare per trip for November and December.
+
+select PickUp_Month, round(avg(Fare_amount), 2) as AverageFare from NYC_Taxi_ORC 
+group by PickUp_Month;
+
+/* Average Fare for Nov = 41.16 and Average Fare for Dec = 41.33 */
+
+
+
+-- ****************************** Question 2 ****************************** --
+-- Q2. Explore the ‘number of passengers per trip’ - how many trips are made by each level of ‘Passenger_count’? Do most people travel solo or with other people?
+select passenger_count, count(passenger_count) as CountofTrips 
+from NYC_Taxi_ORC 
+group by passenger_count 
+order by CountofTrips desc;
+
+/* The hoghest count of trips are 610313 made by solo passenger */
+
+-- ****************************** Question 3 ****************************** --
+-- Q3. Which is the most preferred mode of payment?
+
+select payment_type, count(payment_type) as CountOfPayments from NYC_Taxi_ORC 
+group by payment_type 
+order by CountOfPayments;
+
+/* The most preffered mode of payment is Credit Card */
+
+-- ****************************** Question 4 ****************************** --
+-- Q4. What is the average tip paid per trip? Compare the average tip with the 25th, 50th and 75th percentiles and 
+-- comment whether the ‘average tip’ is a representative statistic (of the central tendency) of ‘tip amount paid’. 
+-- Hint: You may use percentile_approx(DOUBLE col, p): Returns an approximate pth percentile of a numeric column (including floating point types) in the group.
+
+select round(avg(tip_amount), 2) as AverageTip, 
+percentile_approx(cast(tip_amount as double), 0.25) as 25thPercentile,
+percentile_approx(cast(tip_amount as double), 0.50) as 50thPercentile,
+percentile_approx(cast(tip_amount as double), 0.75) as 75thPercentile
+from NYC_Taxi_ORC;
+
+/* As value of mean of average tip is closer to the 50th percentile so its is a representative statistic (of the central tendency)
+of ‘tip amount paid’ */
+
+-- ****************************** Question 5 ****************************** --
+-- Q5. Explore the ‘Extra’ (charge) variable - what fraction of total trips have an extra charge is levied?
+
+
+select extra, count(extra) as Extra_Count from NYC_Taxi_ORC group by extra;
+
+select Extra_Count/TotalExtra as Fraction
+from (select extra, count(extra) as Extra_Count, count(*) as TotalExtra from NYC_Taxi_ORC group by extra having extra = 0) ff;
+
+
+select count(extra) as Extra_Count from NYC_Taxi_ORC where extra != 0
+union all
+select count(extra) as Extra_All from NYC_Taxi_ORC;
+
+
+-- ************************************************************************************ --
+-- ****************************** Part 3 - Analysis - II ****************************** --
+-- ************************************************************************************ --
+
+-- Q1. What is the correlation between the number of passengers on any given trip, and the tip paid per trip? Do multiple travellers tip more 
+-- compared to solo travellers? Hint: Use CORR(Col_1, Col_2)
+
+select round(corr(passenger_count, tip_amount), 2) from NYC_Taxi_ORC;
+
+/* Passenger Count and Tip Amount shows a very weak correlation */
+/* The Correlation factor Passenger Count and Tip Amount is -0.03, which signifies a weak correlation */
+/* Negative correlation shows that Tip Amount would decreases with increase in Passenger Count */
+/* However the decrease in value is very very small as correlation factor values is very low i.e. -0.03 */
+
+
+
+-- Q2. Segregate the data into five segments of ‘tip paid’: [0-5), [5-10), [10-15) , [15-20) and >=20. 
+-- Calculate the percentage share of each bucket (i.e. the fraction of trips falling in each bucket).
+
+select count(*) as Tip0to5 from NYC_Taxi_ORC 
+where tip_amount >= 0 and  tip_amount < 5;
+union all
+select count(*) as TipAll from NYC_Taxi_ORC;
+
+select count(*) Tip5to10 from NYC_Taxi_ORC 
+where tip_amount >= 5 and  tip_amount < 10;
+
+select * from NYC_Taxi_ORC 
+where tip_amount >= 10 and  tip_amount < 15;
+
+select * from NYC_Taxi_ORC 
+where tip_amount >= 15 and  tip_amount < 20;
+
+select * from NYC_Taxi_ORC 
+where tip_amount >= 20;
+
+
+-- Q3. Which month has a greater average ‘speed’ - November or December? 
+-- Note that the variable ‘speed’ will have to be derived from other metrics. 
+-- Hint: You have columns for distance and time
+
+
+select month(dropoff_datetime) as Mnth, 
+round(avg(trip_distance/((unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime))/3600)),2) as Average_Speed
+from NYC_Taxi_ORC where month(dropoff_datetime) = 11 group by month(dropoff_datetime)
+union all
+select month(dropoff_datetime) as Mnth, 
+round(avg(trip_distance/((unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime))/3600)),2) as Average_Speed
+from NYC_Taxi_ORC where month(dropoff_datetime) = 12 group by month(dropoff_datetime);
+
+/* Avg Speed in Nov = 23.29 and Avg Speed in Dec = 23.53 */
+/* December month has a greated Average speed */
+
+
+-- Q4. Analyse the average speed of the most happening days of the year, 
+-- i.e. 31st December (New year’s eve) and 25th December (Christmas Eve) and compare it with the overall average. 
+
+select month(dropoff_datetime) as Mnth, day(dropoff_datetime) as Dy,
+round(avg(trip_distance/((unix_timestamp(dropoff_datetime) - unix_timestamp(pickup_datetime))/3600)),2) as Average_Speed
+from NYC_Taxi_ORC where month(dropoff_datetime) = 12 and day(dropoff_datetime) = 25 group by (dropoff_datetime);
+
